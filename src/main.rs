@@ -12,7 +12,11 @@ lazy_static! {
 }
 
 fn main() {
-    let gradle_files = find_gradle_files();
+    let args = env::args().collect_vec();
+    let path = &args[1];
+    let path = fs::canonicalize(path).expect("failed to convert provided path to absolute path");
+
+    let gradle_files = find_gradle_files(&path);
     let mut modules: Vec<ModuleWithDependencies> = vec![];
 
     for file in gradle_files {
@@ -26,13 +30,14 @@ fn main() {
         }
     }
 
-    dbg!(&modules);
+    fs::write(
+        format!("{}/modules.uml", path.display()),
+        to_plant_uml_data(modules),
+    )
+    .unwrap();
 }
 
-fn find_gradle_files() -> Vec<PathBuf> {
-    let args = env::args().collect_vec();
-    let path = &args[1];
-    let path = fs::canonicalize(path).expect("failed to convert provided path to absolute path");
+fn find_gradle_files(path: &PathBuf) -> Vec<PathBuf> {
     let path = path.display();
     let file_pattern = &format!("{}/**/*.gradle", path);
     glob(file_pattern)
@@ -50,6 +55,38 @@ fn infer_module_name(path: &PathBuf) -> String {
         .to_str()
         .unwrap()
         .to_string()
+}
+
+fn to_plant_uml_data(input: Vec<ModuleWithDependencies>) -> String {
+    let mut output: Vec<String> = vec![];
+    output.push("@startuml".to_string());
+    output.push("\n".to_string());
+
+    input
+        .iter()
+        .map(|module| &module.module)
+        .map(|name| name.replace('-', "_"))
+        .for_each(|name| {
+            output.push(format!("rectangle {}", name));
+            output.push("\n".to_string());
+        });
+
+    output.push("\n".to_string());
+
+    for module in input {
+        let module_name = module.module;
+        for dep in module.deps {
+            output.push(format!(
+                "{} --> {}",
+                module_name.replace('-', "_"),
+                dep.replace('-', "_")
+            ));
+            output.push("\n".to_string());
+        }
+    }
+
+    output.push("@enduml".to_string());
+    output.into_iter().collect()
 }
 
 fn read_file(path: &PathBuf) -> String {
